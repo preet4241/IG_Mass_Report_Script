@@ -507,9 +507,12 @@ if __name__ == '__main__':
     
     # Start Telegram Bot in a background thread
     if os.getenv("BOT_TOKEN") and os.getenv("OWNER_ID"):
-        bot_thread = threading.Thread(target=run_bot, daemon=True)
-        bot_thread.start()
-        logger.info("Bot thread started")
+        try:
+            bot_thread = threading.Thread(target=run_bot, daemon=True)
+            bot_thread.start()
+            logger.info("Bot thread started")
+        except Exception as e:
+            logger.error(f"Failed to start bot thread: {e}")
     else:
         logger.warning("BOT_TOKEN or OWNER_ID not set, Telegram bot thread not started")
     

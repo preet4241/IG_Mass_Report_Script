@@ -496,9 +496,10 @@ Welcome! Use the buttons below to manage your APIs.
 
     try:
         logger.info("Telegram Bot polling started...")
-        bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        bot.infinity_polling(timeout=60, long_polling_timeout=60, restart_on_change=True)
     except Exception as e:
         logger.error(f"Bot polling error: {e}")
+        time.sleep(5) # Wait before retry if thread persists
 
 if __name__ == "__main__":
     run_bot()
