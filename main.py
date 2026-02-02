@@ -1,10 +1,9 @@
 import threading
 from bot import run_bot
-
-# ... (keep existing imports)
 import os
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import requests
 import random
 import uuid
@@ -14,13 +13,38 @@ from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 from functools import wraps
 
-# Logging setup
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Logging setup with Rotation
+log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+log_file = 'app.log'
+log_handler = RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=5)
+log_handler.setFormatter(log_formatter)
+log_handler.setLevel(logging.INFO)
+
 logger = logging.getLogger("IG_Report_API")
+logger.setLevel(logging.INFO)
+logger.addHandler(log_handler)
+
+# Also log to console
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+logger.addHandler(console_handler)
 
 app = Flask(__name__)
 API_DB_FILE = "api_keys.json"
 CREDIT = "@PR_Bot_Services"
+
+# Global dictionary for smart rate limiting (In-memory fallback for Redis)
+# Format: {target_username: last_report_timestamp}
+target_locks = {}
+lock_timeout = 5 # seconds
+
+def is_target_rate_limited(target):
+    current_time = time.time()
+    last_time = target_locks.get(target, 0)
+    if current_time - last_time < lock_timeout:
+        return True, int(lock_timeout - (current_time - last_time))
+    target_locks[target] = current_time
+    return False, 0
 
 # Updated device info for 2026
 DEVICE_PRESETS = [
@@ -405,6 +429,16 @@ def report():
             "message": f"Invalid report type. Valid types: {list(REPORT_TYPES.keys())}",
             "credit": CREDIT
         }), 400
+
+    # Smart Rate Limiting: 5s gap for same target
+    is_limited, remaining = is_target_rate_limited(target)
+    if is_limited:
+        return jsonify({
+            "status": "error",
+            "message": f"Smart Rate Limit: Please wait {remaining}s before reporting @{target} again.",
+            "target": target,
+            "credit": CREDIT
+        }), 429
     
     # Apply delay
     if delay > 0:

@@ -3,16 +3,28 @@ import json
 import random
 import string
 import logging
+from logging.handlers import RotatingFileHandler
 import platform
 import psutil
+import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Logging setup with Rotation
+log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+log_file = 'bot.log'
+log_handler = RotatingFileHandler(log_file, maxBytes=2*1024*1024, backupCount=3)
+log_handler.setFormatter(log_formatter)
+log_handler.setLevel(logging.INFO)
+
 logger = logging.getLogger("TelegramBot")
+logger.setLevel(logging.INFO)
+logger.addHandler(log_handler)
+
+# Also log to console
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+logger.addHandler(console_handler)
 
 load_dotenv()
 
