@@ -130,38 +130,71 @@ def get_device_headers(session_id):
         'Connection': 'Keep-Alive'
     }
 
+def extract_csrf_from_session(session_id):
+    """Extract CSRF token from session ID - handles both encoded and decoded formats"""
+    parts = session_id.split('%3A') if '%3A' in session_id else session_id.split(':')
+    if len(parts) >= 3:
+        return parts[2][:32]
+    return session_id[:32]
+
 def get_user_id_from_username(session_id, username):
     """Get Instagram user ID from username - improved method"""
     logger.info(f"Resolving username: {username}")
+    logger.info(f"Session ID format: {session_id[:20]}...")
     
-    # Method 1: Mobile API
+    csrf = extract_csrf_from_session(session_id)
+    
+    # Method 1: Mobile API with search endpoint
+    try:
+        headers = get_device_headers(session_id)
+        url = f'https://i.instagram.com/api/v1/users/web_profile_info/?username={username}'
+        
+        resp = requests.get(url, headers=headers, timeout=15)
+        logger.info(f"Mobile web_profile_info response: {resp.status_code}")
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            if 'data' in data and 'user' in data['data']:
+                user_id = str(data['data']['user']['id'])
+                logger.info(f"Resolved via Mobile web_profile: {user_id}")
+                return user_id
+    except Exception as e:
+        logger.warning(f"Mobile web_profile failed: {e}")
+    
+    # Method 2: Mobile usernameinfo endpoint
     try:
         headers = get_device_headers(session_id)
         url = f'https://i.instagram.com/api/v1/users/{username}/usernameinfo/'
         
         resp = requests.get(url, headers=headers, timeout=15)
-        logger.info(f"Mobile API response: {resp.status_code}")
+        logger.info(f"Mobile usernameinfo response: {resp.status_code}")
         
         if resp.status_code == 200:
             data = resp.json()
             if 'user' in data and 'pk' in data['user']:
                 user_id = str(data['user']['pk'])
-                logger.info(f"✓ Resolved via Mobile: {user_id}")
+                logger.info(f"Resolved via Mobile usernameinfo: {user_id}")
                 return user_id
+        else:
+            logger.warning(f"Mobile usernameinfo body: {resp.text[:200]}")
     except Exception as e:
-        logger.warning(f"Mobile API failed: {e}")
+        logger.warning(f"Mobile usernameinfo failed: {e}")
     
-    # Method 2: Web API fallback
+    # Method 3: Web API with proper headers
     try:
-        csrf = session_id.split('%3A')[2][:32] if '%3A' in session_id and len(session_id.split('%3A')) > 2 else session_id[:32]
-        
+        time.sleep(1)
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'X-IG-App-ID': '936619743392459',
             'X-ASBD-ID': '129477',
             'X-CSRFToken': csrf,
-            'Cookie': f'sessionid={session_id}; csrftoken={csrf}',
-            'X-Requested-With': 'XMLHttpRequest'
+            'X-IG-WWW-Claim': 'hmac.AR3W0DThY2Mu5Fag4sW5u3RhaR0iFjP2xVD3nVnrJAqHJpo8',
+            'Cookie': f'sessionid={session_id}; csrftoken={csrf}; ig_did={str(uuid.uuid4())}',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': f'https://www.instagram.com/{username}/',
+            'Origin': 'https://www.instagram.com'
         }
         
         url = f'https://www.instagram.com/api/v1/users/web_profile_info/?username={username}'
@@ -173,10 +206,36 @@ def get_user_id_from_username(session_id, username):
             data = resp.json()
             if 'data' in data and 'user' in data['data']:
                 user_id = str(data['data']['user']['id'])
-                logger.info(f"✓ Resolved via Web: {user_id}")
+                logger.info(f"Resolved via Web API: {user_id}")
                 return user_id
+        else:
+            logger.warning(f"Web API body: {resp.text[:200]}")
     except Exception as e:
         logger.warning(f"Web API failed: {e}")
+    
+    # Method 4: GraphQL query
+    try:
+        time.sleep(1)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'X-IG-App-ID': '936619743392459',
+            'Cookie': f'sessionid={session_id}; csrftoken={csrf}',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+        
+        url = f'https://www.instagram.com/{username}/?__a=1&__d=dis'
+        resp = requests.get(url, headers=headers, timeout=15)
+        
+        logger.info(f"GraphQL response: {resp.status_code}")
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            if 'graphql' in data and 'user' in data['graphql']:
+                user_id = str(data['graphql']['user']['id'])
+                logger.info(f"Resolved via GraphQL: {user_id}")
+                return user_id
+    except Exception as e:
+        logger.warning(f"GraphQL failed: {e}")
     
     logger.error(f"Failed to resolve: {username}")
     return None
@@ -212,7 +271,7 @@ def send_report_to_instagram(session_id, user_id, report_type='spam'):
     try:
         time.sleep(1)
         
-        csrf = session_id.split('%3A')[2][:32] if '%3A' in session_id and len(session_id.split('%3A')) > 2 else session_id[:32]
+        csrf = extract_csrf_from_session(session_id)
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
