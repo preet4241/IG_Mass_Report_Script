@@ -506,9 +506,12 @@ if __name__ == '__main__':
     print("\n" + "=" * 70)
     
     # Start Telegram Bot in a background thread
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    logger.info("Bot thread started")
+    if os.getenv("BOT_TOKEN") and os.getenv("OWNER_ID"):
+        bot_thread = threading.Thread(target=run_bot, daemon=True)
+        bot_thread.start()
+        logger.info("Bot thread started")
+    else:
+        logger.warning("BOT_TOKEN or OWNER_ID not set, Telegram bot thread not started")
     
     # Using a slightly different port or just ensuring it's clean
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
