@@ -19,3 +19,9 @@ pyTelegramBotAPI
 python-dotenv
 requests
 gunicorn
+flask
+gunicorn
+psutil
+pyTelegramBotAPI
+python-dotenv
+requests
