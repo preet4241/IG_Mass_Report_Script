@@ -261,6 +261,10 @@ def send_report_to_instagram(session_id, user_id, report_type='spam'):
         
         logger.info(f"Mobile flag_user: {resp.status_code}")
         
+        if resp.status_code == 429:
+            logger.warning("Rate limit (429) hit on Mobile API")
+            return {"success": False, "message": "Rate limited by Instagram (429)", "status_code": 429}
+            
         if resp.status_code in [200, 201]:
             logger.info("✓ Report sent via Mobile API")
             return {"success": True, "method": "mobile_api"}
@@ -292,6 +296,10 @@ def send_report_to_instagram(session_id, user_id, report_type='spam'):
         
         logger.info(f"Web report: {resp.status_code}")
         
+        if resp.status_code == 429:
+            logger.warning("Rate limit (429) hit on Web API")
+            return {"success": False, "message": "Rate limited by Instagram (429)", "status_code": 429}
+            
         if resp.status_code in [200, 201]:
             logger.info("✓ Report sent via Web API")
             return {"success": True, "method": "web_api"}
@@ -317,6 +325,10 @@ def send_report_to_instagram(session_id, user_id, report_type='spam'):
         
         logger.info(f"Bloks report: {resp.status_code}")
         
+        if resp.status_code == 429:
+            logger.warning("Rate limit (429) hit on Bloks API")
+            return {"success": False, "message": "Rate limited by Instagram (429)", "status_code": 429}
+            
         if resp.status_code in [200, 201]:
             logger.info("✓ Report sent via Bloks API")
             return {"success": True, "method": "bloks_api"}
@@ -425,6 +437,13 @@ def report():
             "method": result.get('method', 'unknown'),
             "credit": CREDIT
         })
+    elif result.get('status_code') == 429:
+        return jsonify({
+            "status": "error",
+            "message": "Too many requests. Instagram has rate limited this session.",
+            "target": target,
+            "credit": CREDIT
+        }), 429
     else:
         return jsonify({
             "status": "error",
