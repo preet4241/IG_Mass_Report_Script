@@ -1,9 +1,10 @@
 import threading
 from bot import run_bot
+
+# ... (keep existing imports)
 import os
 import json
 import logging
-from logging.handlers import RotatingFileHandler
 import requests
 import random
 import uuid
@@ -13,38 +14,13 @@ from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 from functools import wraps
 
-# Logging setup with Rotation
-log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-log_file = 'app.log'
-log_handler = RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=5)
-log_handler.setFormatter(log_formatter)
-log_handler.setLevel(logging.INFO)
-
+# Logging setup
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("IG_Report_API")
-logger.setLevel(logging.INFO)
-logger.addHandler(log_handler)
-
-# Also log to console
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(log_formatter)
-logger.addHandler(console_handler)
 
 app = Flask(__name__)
 API_DB_FILE = "api_keys.json"
 CREDIT = "@PR_Bot_Services"
-
-# Global dictionary for smart rate limiting (In-memory fallback for Redis)
-# Format: {target_username: last_report_timestamp}
-target_locks = {}
-lock_timeout = 5 # seconds
-
-def is_target_rate_limited(target):
-    current_time = time.time()
-    last_time = target_locks.get(target, 0)
-    if current_time - last_time < lock_timeout:
-        return True, int(lock_timeout - (current_time - last_time))
-    target_locks[target] = current_time
-    return False, 0
 
 # Updated device info for 2026
 DEVICE_PRESETS = [
@@ -154,71 +130,38 @@ def get_device_headers(session_id):
         'Connection': 'Keep-Alive'
     }
 
-def extract_csrf_from_session(session_id):
-    """Extract CSRF token from session ID - handles both encoded and decoded formats"""
-    parts = session_id.split('%3A') if '%3A' in session_id else session_id.split(':')
-    if len(parts) >= 3:
-        return parts[2][:32]
-    return session_id[:32]
-
 def get_user_id_from_username(session_id, username):
     """Get Instagram user ID from username - improved method"""
     logger.info(f"Resolving username: {username}")
-    logger.info(f"Session ID format: {session_id[:20]}...")
     
-    csrf = extract_csrf_from_session(session_id)
-    
-    # Method 1: Mobile API with search endpoint
-    try:
-        headers = get_device_headers(session_id)
-        url = f'https://i.instagram.com/api/v1/users/web_profile_info/?username={username}'
-        
-        resp = requests.get(url, headers=headers, timeout=15)
-        logger.info(f"Mobile web_profile_info response: {resp.status_code}")
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if 'data' in data and 'user' in data['data']:
-                user_id = str(data['data']['user']['id'])
-                logger.info(f"Resolved via Mobile web_profile: {user_id}")
-                return user_id
-    except Exception as e:
-        logger.warning(f"Mobile web_profile failed: {e}")
-    
-    # Method 2: Mobile usernameinfo endpoint
+    # Method 1: Mobile API
     try:
         headers = get_device_headers(session_id)
         url = f'https://i.instagram.com/api/v1/users/{username}/usernameinfo/'
         
         resp = requests.get(url, headers=headers, timeout=15)
-        logger.info(f"Mobile usernameinfo response: {resp.status_code}")
+        logger.info(f"Mobile API response: {resp.status_code}")
         
         if resp.status_code == 200:
             data = resp.json()
             if 'user' in data and 'pk' in data['user']:
                 user_id = str(data['user']['pk'])
-                logger.info(f"Resolved via Mobile usernameinfo: {user_id}")
+                logger.info(f"✓ Resolved via Mobile: {user_id}")
                 return user_id
-        else:
-            logger.warning(f"Mobile usernameinfo body: {resp.text[:200]}")
     except Exception as e:
-        logger.warning(f"Mobile usernameinfo failed: {e}")
+        logger.warning(f"Mobile API failed: {e}")
     
-    # Method 3: Web API with proper headers
+    # Method 2: Web API fallback
     try:
-        time.sleep(1)
+        csrf = session_id.split('%3A')[2][:32] if '%3A' in session_id and len(session_id.split('%3A')) > 2 else session_id[:32]
+        
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'X-IG-App-ID': '936619743392459',
             'X-ASBD-ID': '129477',
             'X-CSRFToken': csrf,
-            'X-IG-WWW-Claim': 'hmac.AR3W0DThY2Mu5Fag4sW5u3RhaR0iFjP2xVD3nVnrJAqHJpo8',
-            'Cookie': f'sessionid={session_id}; csrftoken={csrf}; ig_did={str(uuid.uuid4())}',
-            'X-Requested-With': 'XMLHttpRequest',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': f'https://www.instagram.com/{username}/',
-            'Origin': 'https://www.instagram.com'
+            'Cookie': f'sessionid={session_id}; csrftoken={csrf}',
+            'X-Requested-With': 'XMLHttpRequest'
         }
         
         url = f'https://www.instagram.com/api/v1/users/web_profile_info/?username={username}'
@@ -230,36 +173,10 @@ def get_user_id_from_username(session_id, username):
             data = resp.json()
             if 'data' in data and 'user' in data['data']:
                 user_id = str(data['data']['user']['id'])
-                logger.info(f"Resolved via Web API: {user_id}")
+                logger.info(f"✓ Resolved via Web: {user_id}")
                 return user_id
-        else:
-            logger.warning(f"Web API body: {resp.text[:200]}")
     except Exception as e:
         logger.warning(f"Web API failed: {e}")
-    
-    # Method 4: GraphQL query
-    try:
-        time.sleep(1)
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'X-IG-App-ID': '936619743392459',
-            'Cookie': f'sessionid={session_id}; csrftoken={csrf}',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        }
-        
-        url = f'https://www.instagram.com/{username}/?__a=1&__d=dis'
-        resp = requests.get(url, headers=headers, timeout=15)
-        
-        logger.info(f"GraphQL response: {resp.status_code}")
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if 'graphql' in data and 'user' in data['graphql']:
-                user_id = str(data['graphql']['user']['id'])
-                logger.info(f"Resolved via GraphQL: {user_id}")
-                return user_id
-    except Exception as e:
-        logger.warning(f"GraphQL failed: {e}")
     
     logger.error(f"Failed to resolve: {username}")
     return None
@@ -285,10 +202,6 @@ def send_report_to_instagram(session_id, user_id, report_type='spam'):
         
         logger.info(f"Mobile flag_user: {resp.status_code}")
         
-        if resp.status_code == 429:
-            logger.warning("Rate limit (429) hit on Mobile API")
-            return {"success": False, "message": "Rate limited by Instagram (429)", "status_code": 429}
-            
         if resp.status_code in [200, 201]:
             logger.info("✓ Report sent via Mobile API")
             return {"success": True, "method": "mobile_api"}
@@ -299,7 +212,7 @@ def send_report_to_instagram(session_id, user_id, report_type='spam'):
     try:
         time.sleep(1)
         
-        csrf = extract_csrf_from_session(session_id)
+        csrf = session_id.split('%3A')[2][:32] if '%3A' in session_id and len(session_id.split('%3A')) > 2 else session_id[:32]
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -320,10 +233,6 @@ def send_report_to_instagram(session_id, user_id, report_type='spam'):
         
         logger.info(f"Web report: {resp.status_code}")
         
-        if resp.status_code == 429:
-            logger.warning("Rate limit (429) hit on Web API")
-            return {"success": False, "message": "Rate limited by Instagram (429)", "status_code": 429}
-            
         if resp.status_code in [200, 201]:
             logger.info("✓ Report sent via Web API")
             return {"success": True, "method": "web_api"}
@@ -349,10 +258,6 @@ def send_report_to_instagram(session_id, user_id, report_type='spam'):
         
         logger.info(f"Bloks report: {resp.status_code}")
         
-        if resp.status_code == 429:
-            logger.warning("Rate limit (429) hit on Bloks API")
-            return {"success": False, "message": "Rate limited by Instagram (429)", "status_code": 429}
-            
         if resp.status_code in [200, 201]:
             logger.info("✓ Report sent via Bloks API")
             return {"success": True, "method": "bloks_api"}
@@ -429,16 +334,6 @@ def report():
             "message": f"Invalid report type. Valid types: {list(REPORT_TYPES.keys())}",
             "credit": CREDIT
         }), 400
-
-    # Smart Rate Limiting: 5s gap for same target
-    is_limited, remaining = is_target_rate_limited(target)
-    if is_limited:
-        return jsonify({
-            "status": "error",
-            "message": f"Smart Rate Limit: Please wait {remaining}s before reporting @{target} again.",
-            "target": target,
-            "credit": CREDIT
-        }), 429
     
     # Apply delay
     if delay > 0:
@@ -471,13 +366,6 @@ def report():
             "method": result.get('method', 'unknown'),
             "credit": CREDIT
         })
-    elif result.get('status_code') == 429:
-        return jsonify({
-            "status": "error",
-            "message": "Too many requests. Instagram has rate limited this session.",
-            "target": target,
-            "credit": CREDIT
-        }), 429
     else:
         return jsonify({
             "status": "error",
@@ -559,15 +447,9 @@ if __name__ == '__main__':
     print("\n" + "=" * 70)
     
     # Start Telegram Bot in a background thread
-    if os.getenv("BOT_TOKEN") and os.getenv("OWNER_ID"):
-        try:
-            bot_thread = threading.Thread(target=run_bot, daemon=True)
-            bot_thread.start()
-            logger.info("Bot thread started")
-        except Exception as e:
-            logger.error(f"Failed to start bot thread: {e}")
-    else:
-        logger.warning("BOT_TOKEN or OWNER_ID not set, Telegram bot thread not started")
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    logger.info("Bot thread started")
     
     # Using a slightly different port or just ensuring it's clean
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
