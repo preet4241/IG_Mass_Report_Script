@@ -10,6 +10,7 @@ from telebot import types as telebot_types
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
+import time
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -19,9 +20,32 @@ logger = logging.getLogger("TelegramBot")
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8028312869:AAErsD7WmHHw11c2lL2Jdoj_DBU4bqRv_kQ")
-OWNER_ID = int(os.getenv("OWNER_ID", "8267410570"))
-bot = telebot.TeleBot(BOT_TOKEN)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OWNER_ID_STR = os.getenv("OWNER_ID")
+
+logger.info(f"Checking environment: BOT_TOKEN is {'set' if BOT_TOKEN else 'MISSING'}, OWNER_ID is {OWNER_ID_STR}")
+
+if not BOT_TOKEN:
+    logger.error("❌ BOT_TOKEN not found in environment variables!")
+    # For local testing only, otherwise keep it empty to force secret usage
+    # BOT_TOKEN = "your_default_token_here" 
+
+try:
+    OWNER_ID = int(OWNER_ID_STR) if OWNER_ID_STR else 0
+except ValueError:
+    logger.error("❌ OWNER_ID must be a number!")
+    OWNER_ID = 0
+
+if BOT_TOKEN:
+    try:
+        bot = telebot.TeleBot(BOT_TOKEN)
+        logger.info("Bot instance created successfully")
+    except Exception as e:
+        bot = None
+        logger.error(f"Failed to create bot instance: {e}")
+else:
+    bot = None
+    logger.error("⚠️ Bot instance not created due to missing token.")
 
 API_DB_FILE = "api_keys.json"
 DOMAIN_FILE = "domain.json"
@@ -490,11 +514,27 @@ Welcome! Use the buttons below to manage your APIs.
         logger.error(f"Error in back_main: {e}")
 
 def run_bot():
+    if not bot:
+        logger.error("❌ Cannot start bot: No bot instance.")
+        return
     try:
-        logger.info("🤖 Telegram Bot polling started...")
-        bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        # Test bot connection
+        me = bot.get_me()
+        logger.info(f"✅ Bot connected: @{me.username}")
+        
+        # Send startup message to owner
+        try:
+            bot.send_message(OWNER_ID, "🚀 **Bot is now Online!**\nUse /start to open the panel.", parse_mode='HTML')
+            logger.info(f"Sent startup message to {OWNER_ID}")
+        except Exception as e:
+            logger.error(f"Failed to send startup message: {e}")
+
+        # Basic polling without infinity_polling for thread safety
+        logger.info("Starting polling...")
+        bot.polling(none_stop=True, interval=1, timeout=20)
     except Exception as e:
-        logger.error(f"Bot polling error: {e}")
+        logger.error(f"Bot initialization error: {e}")
+        raise e
 
 if __name__ == "__main__":
     run_bot()

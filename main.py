@@ -434,6 +434,23 @@ def check_key():
         "credit": CREDIT
     }), 404
 
+# Start Telegram Bot in a background thread at module level for Gunicorn
+def run_bot_threaded():
+    """Function to run bot in a thread with error handling"""
+    try:
+        from bot import run_bot
+        logger.info("Calling run_bot() from thread")
+        run_bot()
+    except Exception as e:
+        logger.error(f"Bot thread crashed: {e}")
+
+# Prevent double start in some environments (like Flask debug)
+if os.environ.get('WERKZEUG_RUN_MAIN') != 'true' and os.environ.get('BOT_STARTED') != 'true':
+    os.environ['BOT_STARTED'] = 'true'
+    bot_thread = threading.Thread(target=run_bot_threaded, daemon=True)
+    bot_thread.start()
+    logger.info("Bot thread started from main (module level)")
+
 if __name__ == '__main__':
     print("=" * 70)
     print("  Instagram Report API v2.0 - Starting...")
@@ -445,11 +462,6 @@ if __name__ == '__main__':
     print("    GET  /api/create_key - Generate API key")
     print("    GET  /api/check_key - Check key status")
     print("\n" + "=" * 70)
-    
-    # Start Telegram Bot in a background thread
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    logger.info("Bot thread started")
     
     # Using a slightly different port or just ensuring it's clean
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
